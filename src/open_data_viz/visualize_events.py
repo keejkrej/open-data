@@ -294,8 +294,8 @@ def main():
     parser.add_argument("--types", nargs="+", default=None,
                         help="Filter event type names, e.g. Pass Shot Carry")
     parser.add_argument("--limit", type=int, default=None, help="Max number of events to render")
-    parser.add_argument("--output-dir", type=str, default="frames",
-                        help="Directory for PNG frames")
+    parser.add_argument("--output-dir", type=str, default="frames/{match_id}",
+                        help="Directory for PNG frames; {match_id} is replaced with the match ID")
     parser.add_argument("--video", type=str, default="events.mp4",
                         help="Output MP4 filename (saved in output-dir)")
     parser.add_argument("--fps", type=int, default=6, help="Frames per second in output video")
@@ -311,7 +311,7 @@ def main():
     if not has_360:
         print("No 360 data — falling back to event-only rendering (ball/arrows only).")
 
-    output_dir = Path(args.output_dir)
+    output_dir = Path(args.output_dir.format(match_id=args.match_id))
     output_dir.mkdir(parents=True, exist_ok=True)
 
     type_filter = {t.lower() for t in args.types} if args.types else None

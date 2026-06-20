@@ -29,11 +29,11 @@ A small package under [`src/open_data_viz/`](./src/open_data_viz/) renders event
 # Install dependencies and run
 uv sync
 
-# Render all Pass and Shot events for a match into frames/
-uv run viz-events 3764440 --types Pass Shot --output-dir frames
+# Render all Pass and Shot events for a match into frames/<match_id>/
+uv run viz-events 3764440 --types Pass Shot
 
 # Same, but also encode an MP4 at 6 fps
-uv run viz-events 3764440 --types Pass Shot --output-dir frames --video events.mp4 --fps 6
+uv run viz-events 3764440 --types Pass Shot --video events.mp4 --fps 6
 ```
 
 Requires: `uv`, `ffmpeg`. Python dependencies are managed by `uv` via `pyproject.toml`.
