@@ -21,6 +21,23 @@ The [data](./data/) is provided as JSON files exported from the StatsBomb Data A
 
 Some documentation about the meaning of different events and the format of the JSON can be found in the [`doc`](./doc) directory.
 
+## Visualising events
+
+A small package under [`src/open_data_viz/`](./src/open_data_viz/) renders events that have 360 freeze-frame data as PNG frames and an MP4 video. Each frame shows the pitch, the visible area, every tracked player (teammate/opponent/actor/keeper), the ball, plus an arrow for passes and shots.
+
+```bash
+# Install dependencies and run
+uv sync
+
+# Render all Pass and Shot events for a match into frames/
+uv run viz-events 3764440 --types Pass Shot --output-dir frames
+
+# Same, but also encode an MP4 at 6 fps
+uv run viz-events 3764440 --types Pass Shot --output-dir frames --video events.mp4 --fps 6
+```
+
+Requires: `uv`, `ffmpeg`. Python dependencies are managed by `uv` via `pyproject.toml`.
+
 ## Careers
 
 If you're interested in football data, [StatsBomb is always hiring!](https://statsbomb.bamboohr.com/jobs/)
