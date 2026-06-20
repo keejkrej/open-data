@@ -21,7 +21,7 @@ import json
 import subprocess
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, Optional, Tuple
 
 import matplotlib
 matplotlib.use("Agg")  # headless backend
@@ -150,55 +150,58 @@ def format_event_text(event: Dict) -> str:
 
 def render_frame(
     event: Dict,
-    frame: Dict,
+    frame: Optional[Dict],
     output_path: Path,
     figsize: Tuple[int, int] = (12, 8),
     dpi: int = 150,
 ):
-    """Render a single event + 360 freeze frame to PNG."""
+    """Render a single event to PNG. If frame is provided, overlay 360 players/visible area."""
     fig, ax = plt.subplots(figsize=figsize)
     draw_pitch(ax)
 
-    # Visible area polygon
-    visible_area = frame.get("visible_area")
-    if visible_area and len(visible_area) >= 6:
-        pts = np.array(visible_area).reshape(-1, 2)
-        poly = Polygon(pts, closed=True, facecolor="#1f4e1f", edgecolor="none", alpha=0.35)
-        ax.add_patch(poly)
+    has_360 = frame is not None
 
-    # Players
-    teammates_x, teammates_y = [], []
-    opponents_x, opponents_y = [], []
-    actor_loc = None
-    keeper_locs = []
+    if has_360:
+        # Visible area polygon
+        visible_area = frame.get("visible_area")
+        if visible_area and len(visible_area) >= 6:
+            pts = np.array(visible_area).reshape(-1, 2)
+            poly = Polygon(pts, closed=True, facecolor="#1f4e1f", edgecolor="none", alpha=0.35)
+            ax.add_patch(poly)
 
-    for p in frame.get("freeze_frame", []):
-        loc = p.get("location")
-        if not loc or len(loc) < 2:
-            continue
-        x, y = loc
-        if p.get("actor"):
-            actor_loc = (x, y)
-        elif p.get("keeper"):
-            keeper_locs.append((x, y))
-        elif p.get("teammate"):
-            teammates_x.append(x)
-            teammates_y.append(y)
-        else:
-            opponents_x.append(x)
-            opponents_y.append(y)
+        # Players
+        teammates_x, teammates_y = [], []
+        opponents_x, opponents_y = [], []
+        actor_loc = None
+        keeper_locs = []
 
-    # Draw points
-    ax.scatter(teammates_x, teammates_y, c="#3498db", s=120, edgecolors="white", linewidths=1,
-               zorder=5, label="teammate")
-    ax.scatter(opponents_x, opponents_y, c="#e74c3c", s=120, edgecolors="white", linewidths=1,
-               zorder=5, label="opponent")
-    for x, y in keeper_locs:
-        ax.scatter(x, y, c="#f1c40f", s=200, marker="D", edgecolors="black", linewidths=1,
-                   zorder=6, label="keeper")
-    if actor_loc:
-        ax.scatter(actor_loc[0], actor_loc[1], c="#2ecc71", s=250, marker="*",
-                   edgecolors="black", linewidths=1.5, zorder=7, label="actor")
+        for p in frame.get("freeze_frame", []):
+            loc = p.get("location")
+            if not loc or len(loc) < 2:
+                continue
+            x, y = loc
+            if p.get("actor"):
+                actor_loc = (x, y)
+            elif p.get("keeper"):
+                keeper_locs.append((x, y))
+            elif p.get("teammate"):
+                teammates_x.append(x)
+                teammates_y.append(y)
+            else:
+                opponents_x.append(x)
+                opponents_y.append(y)
+
+        # Draw points
+        ax.scatter(teammates_x, teammates_y, c="#3498db", s=120, edgecolors="white", linewidths=1,
+                   zorder=5, label="teammate")
+        ax.scatter(opponents_x, opponents_y, c="#e74c3c", s=120, edgecolors="white", linewidths=1,
+                   zorder=5, label="opponent")
+        for x, y in keeper_locs:
+            ax.scatter(x, y, c="#f1c40f", s=200, marker="D", edgecolors="black", linewidths=1,
+                       zorder=6, label="keeper")
+        if actor_loc:
+            ax.scatter(actor_loc[0], actor_loc[1], c="#2ecc71", s=250, marker="*",
+                       edgecolors="black", linewidths=1.5, zorder=7, label="actor")
 
     # Ball at event location + pass/shot arrows
     loc = event.get("location")
@@ -222,6 +225,8 @@ def render_frame(
 
     # Event text box
     text = format_event_text(event)
+    if not has_360:
+        text += "\n(no 360 data — ball/arrows only)"
     ax.text(
         0.5, 0.98, text,
         transform=ax.transAxes,
@@ -236,8 +241,9 @@ def render_frame(
     # Legend
     handles, labels = ax.get_legend_handles_labels()
     by_label = dict(zip(labels, handles))
-    ax.legend(by_label.values(), by_label.keys(), loc="lower right",
-              facecolor="black", edgecolor="white", labelcolor="white", fontsize=8)
+    if by_label:
+        ax.legend(by_label.values(), by_label.keys(), loc="lower right",
+                  facecolor="black", edgecolor="white", labelcolor="white", fontsize=8)
 
     fig.tight_layout()
     fig.savefig(output_path, dpi=dpi, facecolor="#2d5a27", edgecolor="none")
@@ -301,27 +307,34 @@ def main():
     print(f"Loaded {len(events)} events, {len(three60)} 360 frames, {len(lineups)} lineups "
           f"for match {args.match_id}")
 
-    if not three60:
-        print("No 360 data for this match — cannot render player/ball frames.", file=sys.stderr)
-        sys.exit(1)
+    has_360 = bool(three60)
+    if not has_360:
+        print("No 360 data — falling back to event-only rendering (ball/arrows only).")
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     type_filter = {t.lower() for t in args.types} if args.types else None
 
-    rendered: List[Path] = []
-    for i, frame in enumerate(three60):
-        event = event_by_id.get(frame["event_uuid"])
-        if event is None:
-            continue
+    # Build an iterable of (event, optional_frame) tuples.
+    # Prefer 360 frames where available; otherwise use all events with a location.
+    items_to_render = []
+    if has_360:
+        for i, frame in enumerate(three60):
+            event = event_by_id.get(frame["event_uuid"])
+            if event is None:
+                continue
+            items_to_render.append((i, event, frame))
+    else:
+        for i, event in enumerate(events):
+            if "location" not in event:
+                continue
+            items_to_render.append((i, event, None))
 
+    rendered: List[Path] = []
+    for i, event, frame in items_to_render:
         type_name = event.get("type", {}).get("name", "").lower()
         if type_filter and type_name not in type_filter:
-            continue
-
-        # Only render events that carry a location (ball position)
-        if "location" not in event:
             continue
 
         frame_path = output_dir / f"{i:05d}_{event['id'][:8]}.png"
